@@ -22,11 +22,41 @@ class crawler:
     # Auxilliary function for getting an entry id and adding
     # it if it's not present
     def getentryid(self, table, field, value, createnew = True):
-        return None
+        cur = self.con.execute(
+            f"select rowid from {table} where {field} = {value}")
+
+        res = cur.fetchone()
+
+        if res == None:
+            cur = self.con.execute(
+                f"insert into {table} ({field}) values ({value})")
+            return cur.lastrowid
+
+        else:
+            return res[0]
 
     # Index an individual page
     def addtoindex(self, url, soup):
-        print(f"Indexing {url}")
+        if self.isindexed(url): return
+        print("Indexing " + url)
+
+
+        # Get the individual words
+        text = self.gettextonly(soup)
+        words = self.separatewords(text)
+
+        # Get the URL id
+        urlid = self.getentryid('urllist', 'url', url)
+
+        # Link each word to this url
+        for i in range(len(words)):
+            word = words[i]
+            if word in ignorewords: continue
+
+            wordid = self.getentryid('wordlist', 'word', word)
+            self.con.execute(f'insert into wordlocation(urlid, wordid, location)\
+values ({urlid}, {wordid}, {i})")
+                             
 
     # Extract the text from an HTML page (no tags)
     def gettextonly(self, soup):
@@ -52,6 +82,15 @@ class crawler:
 
     # Return true if this url is already indexed
     def isindexed(self, url):
+        u = self.con.execute(
+            f"select rowid from urllist where url = {url}").fetchone()
+
+        if u != None:
+            # Check if it has actually been crawled
+            v = self.con.execute(
+                f"select * from wordlocation where urlid = {u[0]}").fetchone()
+
+            if v!= None: return True
         return False
 
     # Add a link between two pages
@@ -110,6 +149,57 @@ class crawler:
         self.con.execute('create index urlfromidx on urlfromidx(fromid)')
         self.dbcommit()
         
+
+
+
+
+# New class that you'll use for searching
+class searcher:
+    def __init__(self, dbname):
+        self.con = sqlite.connect(dbname)
+
+    def __del__(self):
+        self.con.close()
+
+    def getmatchrows(self, q):
+        # Strings to build the query
+        fieldlist = 'w0.urlid'
+        tablelist = ''
+        clauselist = ''
+        wordids = []
+
+
+        # Split the words by spaces
+        words = q.split(' ')
+        tablenumber = 0
+
+
+        for word in words:
+            # Get the word ID
+            wordrows = self.con.execute(
+                f"select rowid from wordlist where word = {word}").fetchone()
+
+            if wordrow != None:
+                wordid = wordrow[0]
+                wordids.append(wordid)
+
+                if tablenumber > 0:
+                    tablelist += ','
+                    clauselist += ' and '
+                    clauselist += 'w%d.urlid=w%d.urlid and ' % (tablenumber-1, tablenumber)
+
+                filedlist += ', w%d.location' % tablenumber
+                tablelist += f'wordlocation w{tablenumber}'
+                clauselist += 'w{tablenumber}={wordid}')
+                tablenumber += 1
+
+        # Create the query from the separate parts
+        fullquery = f"select {fieldlist} from {tablelist} where {clauselist}
+        cur = self.con.execute(fullquery)
+        rows [= [row for row in cur]
+
+
+        return rows, wordids
 
 
 # Create a list of words to ignore

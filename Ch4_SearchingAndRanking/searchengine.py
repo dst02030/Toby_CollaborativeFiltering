@@ -54,8 +54,8 @@ class crawler:
             if word in ignorewords: continue
 
             wordid = self.getentryid('wordlist', 'word', word)
-            self.con.execute(f'insert into wordlocation(urlid, wordid, location)\
-values ({urlid}, {wordid}, {i})")
+            self.con.execute(f'''insert into wordlocation(urlid, wordid, location)\
+            values ({urlid}, {wordid}, {i})''')
                              
 
     # Extract the text from an HTML page (no tags)
@@ -160,7 +160,7 @@ class searcher:
 
     def __del__(self):
         self.con.close()
-
+    
     def getmatchrows(self, q):
         # Strings to build the query
         fieldlist = 'w0.urlid'
@@ -190,17 +190,71 @@ class searcher:
 
                 filedlist += ', w%d.location' % tablenumber
                 tablelist += f'wordlocation w{tablenumber}'
-                clauselist += 'w{tablenumber}={wordid}')
+                clauselist += 'w{tablenumber}={wordid}'
                 tablenumber += 1
 
         # Create the query from the separate parts
-        fullquery = f"select {fieldlist} from {tablelist} where {clauselist}
+        fullquery = f"select {fieldlist} from {tablelist} where {clauselist}"
         cur = self.con.execute(fullquery)
-        rows [= [row for row in cur]
+        rows = [row for row in cur]
 
 
         return rows, wordids
 
+
+    def getcoredlist(self, rows, wordids):
+        totalscores = dict([(row[0], 0) for row in rows])
+
+        # This is where you'll later put the scoring functions
+        weights = []
+
+        for (weight, socres) in weights:
+            for url in totalscores:
+                totalscores[url] += weight * scores[url]
+
+        return totalscores
+
+
+    def geturlname(self, id):
+        return self.con.execute(
+            "select url from urllist where rowid=%d" % id).fetchone()[0]
+
+    def query(self, q):
+        rows, wordids = self.getmatchrows(q)
+        scores = self.getscoredlist(rows, wordids)
+        rankedscores = sorted([(score, url) for (url, score) in scores.items()], reverse = 1)
+
+        for (score, urlid) in rankedscores[:10]:
+            print("%f\t%s" % (score, self.geturlname(urlid)))
+    
+
+    def normalizescores(self, scores, smallIsBetter=0):
+        vsmall = 0.00001 # Avoid division by zero errors
+        if smallIsBetter:
+            minscore = min(scores.values())
+            return dict([(u, float(minscore)/max(vsmall, l)) for (u, l) in scores.items()])
+
+        else:
+            maxscore = max(scores.values())
+            if maxscore == 0: maxscore = vsmall
+            return dict([(u, float(c)/maxscore) for (u, c) in scores.items()])
+
+    def frequencyscore(self, rows):
+        count = dict([(row[0], 0) for row in rows])
+        for row in rows: counts[row[0]]+=1
+        return self.normalizescores(counts)
+
+    def locationsocre(self, rows):
+        locations = dict([(row[0], 1000000) for row in rows])
+        for row in rows:
+            loc = sum(row[1:])
+            if loc<locations[row[0]]: locations[row[0]] = loc
+
+        return self.normalizescores(locations, smallIsBetter = 1)
+
+    
+    
+    
 
 # Create a list of words to ignore
 ignorewords = set(['the', 'of', 'to', 'and', 'a', 'in', 'is', 'it'])

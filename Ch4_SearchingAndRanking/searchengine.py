@@ -317,7 +317,7 @@ class searcher:
 
         maxscore = max(linkscores.values())
         normalizedscores = dict([(u, float(l)/maxscore) for (u, l) in linkscores.items()])
-        return normalizedscores
+        return normalizedscorescd 
         
 
 # Create a list of words to ignore

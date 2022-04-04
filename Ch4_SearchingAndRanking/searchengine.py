@@ -150,7 +150,38 @@ class crawler:
         self.dbcommit()
         
 
+    def calculatepagerank(self, iterations = 20):
+        # Clear out the current PageRank tables
+        self.con.execute('drop table if exists pagerank')
+        self.con.execute('create table pagerank(urlid primary key, score)')
 
+        # Initialize every url with a PageRank of 1
+        self.con.execute('insert into pagerank select rowid, 1.0 from urllist')
+        self.dbcommit()
+
+        for i in range(iterations):
+            print("Iteration %d" % (i))
+            for (urlid, ) in self.con.execute('select rowid from urllist'):
+                pr = .15
+
+                # Loop through all the pages that link to this one
+                for (linker, ) in self.con.execute("SELECT distinct fromid from link where toid = %d" % urlid):
+                    # Get the PageRank of the linker
+                    linkingpr = self.con.execute("SELECT score from pagerank where urlid = %d" % linker).fetchone()[0]
+
+
+                    # Get the total number of links from the linker
+                    linkingcount = self.con.execute("SELECT count(*) from link where fromid = %d" % linker).fetchone()[0]
+                    pr += .85 * (linkingpr / linkingcount)
+
+                self.con.execute("UPDATE pagerank set score = %f where urlid = %d" % (pr, urlid))
+            self.dbcommit()
+
+    def pagerankscore(self, rows):
+        pageranks = dict([(row[0], self.con.execute("SELECT socre FROM pagerank WHERE urlid = %d" % row[0]).fetchone()[0]) for row in rows])
+        maxranks = max(pageranks.values())
+        normalizedscores = dict([(u, float(l)/maxrank) for (u, l) in pageranks.items()])
+        return normalizedscores
 
 
 # New class that you'll use for searching
@@ -252,9 +283,42 @@ class searcher:
 
         return self.normalizescores(locations, smallIsBetter = 1)
 
+
+    def distancesocre(self, rows):
+        # If there's only one word, everyone wins!
+        if len(rows[0])<2: return dict([(row[0], 1.0) for row in rows])
+
+        # Initialize the dictionary with large values
+        mindistance = dict([(row[0], 1000000) for row in rows])
+
+        for row in rows:
+            dist = sum([abs(row[i] - row[i-1]) for i in range(2, len(row))])
+            if dist<mindistance[row[0]]: mindistance[row[0]] = dist
+
+        return self.normalizescores(mindistance, smallIsBetter = 1 )
+
     
-    
-    
+    def inboundlinksocre(self, rows):
+        uniqueurls = set([row[0] for row in rows])
+        inboundcount = dict([(u, self.con.execute('SELECT count(*) FROM link WHERE toid = %d' % u).fetchone()[0]) for u in uniqueurls])
+        return self.normalizescores(inboundcount)
+
+
+    def linktextscore(self, rows, wordids):
+        linkscores = dict([(row[0], 0) for row in rows])
+
+        for wordid in wordids:
+            cur = self.con.execute("SELECT link.fromid, link.toid from linkwords, link where wordid = %d and linkwords.linkid = link.rowid" % wordid)
+
+            for (fromid, toid) in cur:
+                if toid in linkscores:
+                    pr = self.con.execute("SELECT score FROM pagerank WHERE urlid = %d" % fromid).fetchone()[0]
+                    linkscores[toid] += pr
+
+        maxscore = max(linkscores.values())
+        normalizedscores = dict([(u, float(l)/maxscore) for (u, l) in linkscores.items()])
+        return normalizedscores
+        
 
 # Create a list of words to ignore
 ignorewords = set(['the', 'of', 'to', 'and', 'a', 'in', 'is', 'it'])
